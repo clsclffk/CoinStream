@@ -1,0 +1,247 @@
+services:
+  zookeeper:
+    image: bitnami/zookeeper:3.9
+    container_name: zookeeper
+    restart: unless-stopped
+    ports:
+      - "2181:2181"
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    networks:
+      - coin_net
+
+  kafka:
+    image: bitnami/kafka:3.6
+    container_name: kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"  # 내부
+      - "29092:29092"  # 외부
+      - "9404:9404"   # JMX Exporter HTTP 포트 직접 노출
+    environment:
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,PLAINTEXT_HOST://:29092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      - ALLOW_PLAINTEXT_LISTENER=yes
+      # JMX Exporter Java Agent 붙이기
+      - KAFKA_OPTS=-javaagent:/opt/jmx/jmx_prometheus_javaagent.jar=9404:/opt/jmx/config.yml
+    depends_on:
+      - zookeeper
+    volumes:
+      - kafka_data:/bitnami/kafka
+      # 추가
+      - ./jmx:/opt/jmx   # jmx 폴더 마운트
+    networks:
+      - coin_net
+
+  producer:
+    build: ./producer
+    container_name: producer
+    depends_on:
+      - kafka
+    restart: always
+    networks:
+      - coin_net
+
+  spark-master:
+    build: ./spark
+    container_name: spark-master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_OPTS=-javaagent:/opt/jmx/jmx_prometheus_javaagent.jar=8090:/opt/jmx/config.yml
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+    ports:
+      - "7077:7077"
+      - "8081:8080"
+      - "8090:8090"
+    volumes:
+      - ./spark/scripts:/opt/bitnami/spark/scripts
+      - ./jmx:/opt/jmx
+    networks:
+      - coin_net
+
+  spark-worker-1:
+    build: ./spark
+    container_name: spark-worker-1
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_WORKER_OPTS=-javaagent:/opt/jmx/jmx_prometheus_javaagent.jar=8091:/opt/jmx/config.yml
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+    depends_on:
+      - spark-master
+    volumes:
+      - ./spark/scripts:/opt/bitnami/spark/scripts
+      - ./jmx:/opt/jmx
+    networks:
+      - coin_net
+    ports:
+      - "8091:8091" 
+
+  spark-worker-2:
+    build: ./spark
+    container_name: spark-worker-2
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_WORKER_OPTS=-javaagent:/opt/jmx/jmx_prometheus_javaagent.jar=8092:/opt/jmx/config.yml
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+    depends_on:
+      - spark-master
+    volumes:
+      - ./spark/scripts:/opt/bitnami/spark/scripts
+      - ./jmx:/opt/jmx
+    networks:
+      - coin_net
+    ports:
+      - "8092:8092"
+
+  redis:
+    image: redis/redis-stack-server:latest
+    container_name: redis
+    ports:
+      - "6379:6379"
+      - "8001:8001" 
+    volumes:
+      - ./redis_data:/data
+    networks:
+      - coin_net
+
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: redis-exporter
+    ports:
+      - "9121:9121"
+    networks:
+      - coin_net
+    command:
+      - "--redis.addr=redis://redis:6379"
+      - "--include-config-metrics"
+
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: airflow
+      MYSQL_USER: airflow
+      MYSQL_PASSWORD: airflow
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./mysql:/var/lib/mysql
+    networks:
+      - coin_net
+
+  airflow-webserver:
+    build: ./airflow 
+    container_name: airflow-webserver
+    depends_on:
+      - mysql
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=mysql+mysqlconnector://airflow:airflow@mysql:3306/airflow
+      - AIRFLOW__CORE__FERNET_KEY=ycF8uPbVEvuAxBxu3uYQ8HnD10h19WY3M6eVN_Rd798=
+    command: webserver
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - /var/run/docker.sock:/var/run/docker.sock 
+    networks:
+      - coin_net
+
+  airflow-scheduler:
+    build: ./airflow 
+    container_name: airflow-scheduler
+    depends_on:
+      - mysql
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=mysql+mysqlconnector://airflow:airflow@mysql:3306/airflow
+      - AIRFLOW__CORE__FERNET_KEY=ycF8uPbVEvuAxBxu3uYQ8HnD10h19WY3M6eVN_Rd798=
+    command: scheduler
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - /var/run/docker.sock:/var/run/docker.sock 
+    networks:
+      - coin_net
+  airflow-exporter:
+    image: pbweb/airflow-prometheus-exporter:latest
+    container_name: airflow-exporter
+    restart: always
+    environment:
+      - AIRFLOW_PROMETHEUS_DATABASE_BACKEND=mysql
+      - AIRFLOW_PROMETHEUS_DATABASE_HOST=mysql
+      - AIRFLOW_PROMETHEUS_DATABASE_PORT=3306
+      - AIRFLOW_PROMETHEUS_DATABASE_USER=airflow
+      - AIRFLOW_PROMETHEUS_DATABASE_PASSWORD=airflow
+      - AIRFLOW_PROMETHEUS_DATABASE_NAME=airflow
+    ports:
+      - "9112:9112"
+    networks:
+      - coin_net
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_INSTALL_PLUGINS=redis-datasource
+    volumes:
+      - ./grafana:/var/lib/grafana
+    networks:
+      - coin_net
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - coin_net
+
+  streaming-job:
+    build:
+      context: ./spark
+      dockerfile: Dockerfile
+    container_name: streaming-job
+    depends_on:
+      - spark-master
+      - kafka
+      - redis
+    command: >
+      spark-submit
+      --master spark://spark-master:7077
+      --conf "spark.driver.extraJavaOptions=-javaagent:/opt/jmx/jmx_prometheus_javaagent.jar=8093:/opt/jmx/config.yml"
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0
+      /opt/bitnami/spark/scripts/streaming_job.py
+    volumes:
+      - ./spark/scripts:/opt/bitnami/spark/scripts
+      - ./jmx:/opt/jmx
+    restart: always
+    networks:
+      - coin_net
+    ports:
+      - "8093:8093"
+    
+volumes:
+  kafka_data:
+    driver: local
+networks:
+  coin_net:
+    external: true

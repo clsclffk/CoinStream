@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+airflow/logs/
+grafana/
+mysql/
+redis_data/
+*.tar.gz
+node_exporter-*/
+.env
+jmx/*.jar

@@ -1,0 +1,5 @@
+pyspark
+redis
+boto3
+pandas
+python-dotenv
