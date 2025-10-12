@@ -1,12 +1,3 @@
-"""
-Kafka → Spark → S3 (전일 로그 배치 적재)
-
-- Kafka 토픽: upbit-ticker
-- 기간: 전일(하루치) 데이터
-- OHLCV 집계 (1분봉)
-- 결과: S3 (Parquet, partitionBy(code, date))
-"""
-
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, from_json, window, min, max, first, last, sum, from_unixtime
@@ -16,6 +7,14 @@ from dotenv import load_dotenv
 import os
 from datetime import datetime, timedelta, timezone
 
+"""
+Kafka → Spark → S3 (전일 로그 배치 적재)
+
+- Kafka 토픽: coin_ticker
+- 적재 기간: 전일 00:00 ~ 오늘 00:00 (KST)
+- 집계 단위: 1분봉 (OHLCV)
+- 결과 저장: AWS S3 (Parquet 형식, partitionBy(code, date))
+"""
 
 def create_spark_session():
     load_dotenv()
@@ -46,31 +45,23 @@ def batch_to_s3():
         StructField("trade_timestamp", LongType())
     ])
 
-    # === 전일 날짜 범위 ===
-    # today = datetime.utcnow().date()
-    # yesterday = today - timedelta(days=1)
-
-    # start_ts = int(datetime.combine(yesterday, datetime.min.time()).timestamp() * 1000)
-    # end_ts = int(datetime.combine(today, datetime.min.time()).timestamp() * 1000)
-
     # === 전일 날짜 범위 (KST 기준) ===
     KST = timezone(timedelta(hours=9))
 
     today_kst = datetime.now(KST).date()
     yesterday_kst = today_kst - timedelta(days=1)
-    start_ts = int(datetime.combine(today_kst, datetime.min.time(), tzinfo=KST).timestamp() * 1000)
-    end_ts = int(datetime.now(KST).timestamp() * 1000) 
 
-    # start_ts = int(datetime.combine(yesterday_kst, datetime.min.time(), tzinfo=KST).timestamp() * 1000)
-    # end_ts = int(datetime.combine(today_kst, datetime.min.time(), tzinfo=KST).timestamp() * 1000)
+    # 전일 00:00 ~ 오늘 00:00 구간
+    start_ts = int(datetime.combine(yesterday_kst, datetime.min.time(), tzinfo=KST).timestamp() * 1000)
+    end_ts = int(datetime.combine(today_kst, datetime.min.time(), tzinfo=KST).timestamp() * 1000)
 
     print(">>> KST start:", start_ts,
-      "KST:", datetime.fromtimestamp(start_ts/1000, tz=KST),
-      "UTC:", datetime.utcfromtimestamp(start_ts/1000))
+        "KST:", datetime.fromtimestamp(start_ts/1000, tz=KST),
+        "UTC:", datetime.utcfromtimestamp(start_ts/1000))
 
     print(">>> KST end:", end_ts,
         "KST:", datetime.fromtimestamp(end_ts/1000, tz=KST),
-        "UTC:", datetime.utcfromtimestamp(encleard_ts/1000))
+        "UTC:", datetime.utcfromtimestamp(end_ts/1000))
 
     # Kafka → 배치 읽기
     df = spark.read \

@@ -3,3 +3,4 @@ redis
 boto3
 pandas
 python-dotenv
+prometheus_client

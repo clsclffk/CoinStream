@@ -11,7 +11,8 @@ default_args = {
 with DAG(
     dag_id="spark_to_s3_dag",
     default_args=default_args,
-    schedule_interval="@daily",
+    schedule_interval=None,
+    # schedule_interval="@daily",
     start_date=datetime(2025, 9, 22),
     catchup=False,
     tags=["spark", "s3"],

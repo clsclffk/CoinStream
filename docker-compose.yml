@@ -228,6 +228,7 @@ services:
       spark-submit
       --master spark://spark-master:7077
       --conf "spark.driver.extraJavaOptions=-javaagent:/opt/jmx/jmx_prometheus_javaagent.jar=8093:/opt/jmx/config.yml"
+      --conf spark.sql.streaming.metricsEnabled=true
       --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0
       /opt/bitnami/spark/scripts/streaming_job.py
     volumes:
@@ -237,7 +238,7 @@ services:
     networks:
       - coin_net
     ports:
-      - "8093:8093"
+      - "8099:8099" 
     
 volumes:
   kafka_data:

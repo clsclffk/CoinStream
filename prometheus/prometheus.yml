@@ -27,5 +27,6 @@ scrape_configs:
       - targets: ['43.200.189.31:9100']
   
   - job_name: 'spark-streaming'
+    scrape_interval: 5s
     static_configs:
-      - targets: ['streaming-job:8093']
+      - targets: ['streaming-job:8099']
